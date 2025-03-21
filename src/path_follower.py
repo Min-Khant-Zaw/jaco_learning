@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 """
 This node moves the Jaco using a specified controller, tracking a trajectory
 given by a specified planner.
@@ -11,7 +11,7 @@ Authors: Andreea Bobu (abobu@eecs.berkeley.edu), Andrea Bajcsy (abajcsy@eecs.ber
 Based on: https://w3.cs.jmu.edu/spragunr/CS354_S15/labs/pid_lab/pid_lab.shtml
 """
 
-import roslib; roslib.load_manifest('kinova_demo')
+import roslib
 
 import rospy
 import math
@@ -23,8 +23,8 @@ from utils.environment import Environment
 from controllers.pid_controller import PIDController
 from planners.trajopt_planner import TrajoptPlanner
 
-import kinova_msgs.msg
-from kinova_msgs.srv import *
+from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 import numpy as np
 
@@ -50,8 +50,8 @@ class PathFollower(object):
 		# Publish to ROS at 100hz.
 		r = rospy.Rate(100)
 
-		print "----------------------------------"
-		print "Moving robot, press ENTER to quit:"
+		print("----------------------------------")
+		print("Moving robot, press ENTER to quit:")
 
 		while not rospy.is_shutdown():
 
@@ -59,10 +59,21 @@ class PathFollower(object):
 				line = raw_input()
 				break
 
-			self.vel_pub.publish(ros_utils.cmd_to_JointVelocityMsg(self.cmd))
+			# self.vel_pub.publish(ros_utils.cmd_to_JointVelocityMsg(self.cmd))
+
+			traj_msg = JointTrajectory()
+			traj_msg.joint_names = [f'panda_joint{i}' for i in range(1, 8)]
+
+			point = JointTrajectoryPoint()
+			point.positions = (self.curr_pos + self.cmd * self.timestep).flatten().tolist()
+			point.time_from_start = rospy.Duration(self.timestep)
+			
+			traj_msg.points.append(point)
+			self.vel_pub.publish(traj_msg)
+
 			r.sleep()
 
-		print "----------------------------------"
+		print("----------------------------------")
 
 	def load_parameters(self):
 		"""
@@ -134,22 +145,39 @@ class PathFollower(object):
 		"""
 
 		# Create joint-velocity publisher.
-		self.vel_pub = rospy.Publisher(self.prefix + '/in/joint_velocity', kinova_msgs.msg.JointVelocity, queue_size=1)
+		self.vel_pub = rospy.Publisher('/position_joint_trajectory_controller/command', JointTrajectory, queue_size=1)
 
 		# Create subscriber to joint_angles.
-		rospy.Subscriber(self.prefix + '/out/joint_angles', kinova_msgs.msg.JointAngles, self.joint_angles_callback, queue_size=1)
+		rospy.Subscriber('/franka_state_controller/joint_states', JointState, self.joint_state_callback, queue_size=1)
 	
-	def joint_angles_callback(self, msg):
+	# def joint_angles_callback(self, msg):
+	# 	"""
+	# 	Reads the latest position of the robot and publishes an
+	# 	appropriate torque command to move the robot to the target.
+	# 	"""
+
+	# 	# Read the current joint angles from the robot.
+	# 	self.curr_pos = np.array([msg.joint1,msg.joint2,msg.joint3,msg.joint4,msg.joint5,msg.joint6,msg.joint7]).reshape((7,1))
+
+	# 	# Convert to radians.
+	# 	self.curr_pos = self.curr_pos*(math.pi/180.0)
+
+	# 	# Update cmd from PID based on current position.
+	# 	self.cmd = self.controller.get_command(self.curr_pos)
+
+	def joint_state_callback(self, msg: JointState):
 		"""
 		Reads the latest position of the robot and publishes an
 		appropriate torque command to move the robot to the target.
 		"""
 
+		joint_map = {name: pos for name, pos in zip(msg.name, msg.position)}
+
 		# Read the current joint angles from the robot.
-		self.curr_pos = np.array([msg.joint1,msg.joint2,msg.joint3,msg.joint4,msg.joint5,msg.joint6,msg.joint7]).reshape((7,1))
+		self.curr_pos = np.array([joint_map[f'panda_joint{i}'] for i in range(1, 8)]).reshape((7,1))
 
 		# Convert to radians.
-		self.curr_pos = self.curr_pos*(math.pi/180.0)
+		# self.curr_pos = self.curr_pos*(math.pi/180.0)
 
 		# Update cmd from PID based on current position.
 		self.cmd = self.controller.get_command(self.curr_pos)
